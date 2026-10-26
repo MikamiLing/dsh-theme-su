@@ -1,0 +1,27 @@
+{
+  "name": "dsh-theme-su",
+  "version": "0.0.1",
+  "description": "祀 —— DeepSeek Harness 主题：整页水墨长卷、毛玻璃侧栏、侧栏立绘轮换、设置页 Q 版吉祥物。",
+  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "theme", "beautify", "ink-wash"],
+  "license": "MIT",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": ["index.js", "client.js", "cordis.patch.yml", "assets", "docs", "README.md", "LICENSE"],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "platform": "web", "immediately": true, "inject": [] }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MikamiLing/dsh-theme-su.git"
+  },
+  "homepage": "https://github.com/MikamiLing/dsh-theme-su#readme",
+  "bugs": { "url": "https://github.com/MikamiLing/dsh-theme-su/issues" },
+  "engines": { "node": ">=20" }
+}
