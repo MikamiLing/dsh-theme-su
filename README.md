@@ -1,6 +1,6 @@
 # 祀 · dsh-theme-su
 
- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的水墨主题，部分样式全部可调。
+ [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的水墨主题，部分样式可调。
 
 设计语言参考了社区里的「特蕾西娅」主题。
 
