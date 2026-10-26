@@ -4,7 +4,7 @@
 
 设计语言参考了社区里的「特蕾西娅」主题。
 
-素材版权归原画作者，见 [LICENSE](LICENSE)）：
+本项目仅供个人学习交流使用，不可商用，素材版权归原画作者，见 [LICENSE](LICENSE)）：
 
 
 ![祀 · 界面](docs/screenshot-light.png)
@@ -25,4 +25,4 @@ dsh plugin --profile <profile> add github:MikamiLing/dsh-theme-su
 
 ## 许可
 
-插件代码 MIT。`assets/` 里的图片来自本机素材，版权归原作者。
+插件代码 MIT。`assets/` 里的图片来自网络素材，仅供个人学习交流使用，不可商用。版权归原作者，如有侵权请联系删除。
