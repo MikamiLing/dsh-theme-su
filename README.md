@@ -62,7 +62,6 @@ dsh plugin --profile <profile> add github:MikamiLing/dsh-theme-su
 
 ## 开屏动画
 
-宿主在 index 响应里先藏 `#root`、隐藏 shell 的「Loading plugins…」层，并把底色刷成开屏底色；页面里的客户端模块挂好 overlay、渲染出第一帧后，一次性删掉这些规则。反过来，如果客户端模块没跑起来，一段 10 秒的兜底脚本会把界面放出来，不会黑屏锁死。
 
 - 适配：默认 `splashFit: fill`，把画面直接拉伸到整个窗口，不裁切也不留黑边；代价是窗口比例与原片不同时会变形（当前约 1335×860 对 16:9）。想保持原比例又不要黑边就选「自适应」，想保留原比例并接受黑边就选「完整」，想裁切填满就选「铺满」。
 - 媒体：`<video>` 支持 mp4 / m4v / webm / mov / mkv / ogv / mpg / mpeg / ts；`<img>` 支持 gif / apng / webp / avif / png / jpg / svg / bmp / ico。`.mov` / `.mkv` 能不能播取决于里面的编码；当前 Electron 解不了时开屏会直接跳过（不会卡住），设置页只负责报告路径、扩展名与大小问题。
