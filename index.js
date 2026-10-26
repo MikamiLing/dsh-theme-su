@@ -1,10 +1,12 @@
 /**
  * 祀（dsh-theme-su）— 主题插件，宿主端。
  *
- * 宿主负责浏览器做不到的三件事：
+ * 宿主负责浏览器做不到的事：
  *   1. 存用户的选择（`$DSH_HOME/dsh-theme-su/config.json`）；
  *   2. 把自带的壁纸 / 立绘 / 缩略图按需发给页面，也支持用户自己的图片；
- *   3. 在 index 响应里内联首帧样式，让第一帧就是宣纸色而不是先白闪。
+ *   3. 在 index 响应里内联首帧样式，让第一帧就是宣纸色而不是先白闪；
+ *   4. 开屏动画：解析用户的本机媒体路径、按 Range 发视频、按需打开本机文件
+ *      选择框，并在首帧前把应用盖住（开屏播放完再由页面释放）。
  *
  * 零运行时依赖：插件以 link / file 安装时只会从自己的真实目录解析 import，
  * 依赖 DSH 安装树里的包会 ERR_MODULE_NOT_FOUND 并拖垮整个 profile。
@@ -16,6 +18,16 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync,
 import { homedir } from 'node:os'
 import { extname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import {
+  SPLASH_MEDIA_ROUTE,
+  SPLASH_PICK_ROUTE,
+  notFound as splashNotFound,
+  pickSplashMedia,
+  resolveSplashMedia,
+  serveSplashMedia,
+  splashWire,
+} from './splash.js'
 
 const PACKAGE_DIR = resolve(fileURLToPath(new URL('./', import.meta.url)))
 const ASSET_DIR = join(PACKAGE_DIR, 'assets')
@@ -37,6 +49,26 @@ const PORTRAITS = ['rotate', 'bust', 'su', 'side', 'front', 'none']
 /** 强调色。si = 青玉（默认），ink = 墨（近无彩），moss = 苔绿。 */
 const ACCENTS = ['si', 'ink', 'moss']
 
+/** 开屏媒体的填充方式；adaptive = 完整画面 + 模糊背景填满。 */
+const SPLASH_FITS = ['adaptive', 'contain', 'cover', 'fill']
+
+/** 开屏动画的退出方式。 */
+const SPLASH_SKIPS = ['button', 'click', 'auto', 'never']
+
+/** 配置里这些数值是整数；其余（音量、倍速、圆角）保留小数。 */
+const INTEGER_KEYS = new Set([
+  'scrim',
+  'portraitOpacity',
+  'tint',
+  'splashSkipAfterMs',
+  'splashFadeInMs',
+  'splashFadeOutMs',
+  'splashWaitForAppMs',
+  'splashHoldAfterEndMs',
+  'splashMaxReplays',
+  'splashDuration',
+])
+
 export const DEFAULTS = {
   enabled: true,
   wallpaper: 'scroll',
@@ -44,10 +76,26 @@ export const DEFAULTS = {
   scrim: 50,
   portrait: 'rotate',
   portraitOpacity: 88,
-  glass: true,
+  glass: false,
   radius: 1,
   accent: 'si',
   tint: 100,
+  // 开屏动画。splashSrc 为空表示使用自带的 splash-default.mp4。
+  splashEnabled: true,
+  splashSrc: '',
+  splashFit: 'fill',
+  splashSkip: 'button',
+  splashSkipAfterMs: 1200,
+  splashMuted: true,
+  splashVolume: 0.6,
+  splashBackground: '#000000',
+  splashFadeInMs: 320,
+  splashFadeOutMs: 300,
+  splashPlaybackRate: 1,
+  splashWaitForAppMs: 2500,
+  splashHoldAfterEndMs: 0,
+  splashMaxReplays: 0,
+  splashDuration: 0,
 }
 
 const LIMITS = {
@@ -55,6 +103,15 @@ const LIMITS = {
   portraitOpacity: [0, 100],
   radius: [0, 2],
   tint: [0, 100],
+  splashSkipAfterMs: [0, 60000],
+  splashVolume: [0, 1],
+  splashFadeInMs: [0, 10000],
+  splashFadeOutMs: [0, 10000],
+  splashPlaybackRate: [0.1, 4],
+  splashWaitForAppMs: [0, 60000],
+  splashHoldAfterEndMs: [0, 60000],
+  splashMaxReplays: [0, 100],
+  splashDuration: [0, 600000],
 }
 
 const MIME = {
@@ -90,7 +147,8 @@ export function normalizeConfig(raw) {
       const num = typeof value === 'number' ? value : Number(value)
       if (!Number.isFinite(num)) continue
       const [lo, hi] = LIMITS[key] ?? [fallback, fallback]
-      out[key] = Math.round(Math.min(hi, Math.max(lo, num)))
+      const clamped = Math.min(hi, Math.max(lo, num))
+      out[key] = INTEGER_KEYS.has(key) ? Math.round(clamped) : Number(clamped.toFixed(3))
       continue
     }
     if (typeof value !== 'string') continue
@@ -98,7 +156,11 @@ export function normalizeConfig(raw) {
     if (key === 'wallpaper') out[key] = WALLPAPERS.includes(text) ? text : fallback
     else if (key === 'portrait') out[key] = PORTRAITS.includes(text) ? text : fallback
     else if (key === 'accent') out[key] = ACCENTS.includes(text) ? text : fallback
-    else out[key] = text.slice(0, 4096)
+    else if (key === 'splashFit') out[key] = SPLASH_FITS.includes(text) ? text : fallback
+    else if (key === 'splashSkip') out[key] = SPLASH_SKIPS.includes(text) ? text : fallback
+    else if (key === 'splashBackground') {
+      out[key] = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(text) ? text : fallback
+    } else out[key] = text.slice(0, 4096)
   }
   return out
 }
@@ -273,11 +335,12 @@ export function apply(ctx, rawConfig) {
     const current = settings()
     const art = artworkFor(current)
     return {
-      version: 1,
+      version: 2,
       settings: current,
       catalog: art.catalog,
       assets: art,
       engaged: current.enabled === true,
+      splash: splashWire(current, dshHome),
     }
   }
 
@@ -285,12 +348,46 @@ export function apply(ctx, rawConfig) {
   ctx.on('webserver/index-inject', (table) => {
     try {
       if (!Array.isArray(table)) return
-      if (table.some((row) => row && row.kind === 'style' && typeof row.text === 'string' && row.text.includes('dsh-theme-su-boot'))) return
       const current = settings()
-      const css = bootStyle(current, artworkFor(current))
-      if (css === '') return
-      table.push({ kind: 'style', text: css })
-    } catch { /* 渲染首页不能因为主题失败 */ }
+
+      if (!table.some((row) => row && row.kind === 'style' && typeof row.text === 'string' && row.text.includes('dsh-theme-su-boot'))) {
+        const css = bootStyle(current, artworkFor(current))
+        if (css !== '') table.push({ kind: 'style', text: css })
+      }
+
+      // 开屏动画会接管首帧：先把 shell 自己的加载层和应用藏起来，等客户端把
+      // 开屏挂好、渲染完第一帧后再一次性释放。释放由客户端删掉这些规则完成，
+      // 是单向的，不会因为开屏卸载而重新生效。
+      const splash = splashWire(current, dshHome)
+      if (!splash.engaged) return
+      if (table.some((row) => row && row.kind === 'style' && typeof row.text === 'string' && row.text.includes('dsh-theme-su-splash-boot'))) return
+
+      table.push({
+        kind: 'style',
+        text: '/* dsh-theme-su-splash-boot */ [data-dsh-boot]:has([data-dsh-boot-spinner]){display:none!important}'
+          + '/* dsh-theme-su-splash-cover */ #root{visibility:hidden!important}'
+          + `/* dsh-theme-su-splash-base */ html,body{background-color:${current.splashBackground}!important}`,
+      })
+
+      // 客户端模块万一没跑起来（打包残缺、插件被停用），也必须有一条有界的
+      // 退路，否则 #root 会一直隐藏。每次页面加载都插入一个新脚本，各自计时，
+      // 不依赖会被缓存的 CSS 动画。
+      table.push({
+        kind: 'script',
+        placement: 'head',
+        text: '/* dsh-theme-su-splash-guard */'
+          + 'try{'
+          + 'var m=["dsh-theme-su-splash-cover","dsh-theme-su-splash-base"];'
+          + 'var go=function(){try{'
+          + 'var ss=document.head?document.head.getElementsByTagName("style"):[],doomed=[];'
+          + 'for(var i=0;i<ss.length;i++){var x=ss[i].textContent||"";'
+          + 'for(var j=0;j<m.length;j++){if(x.indexOf(m[j])!==-1){doomed.push(ss[i]);break}}}'
+          + 'for(var k=0;k<doomed.length;k++){doomed[k].remove()}}catch(e){}};'
+          + 'var t=setTimeout(go,10000);'
+          + 'globalThis.__DSH_THEME_SU_SPLASH_GUARD__={release:go,clear:function(){clearTimeout(t)}}'
+          + '}catch(e){}',
+      })
+    } catch { /* 渲染首页不能因为主题或开屏失败 */ }
   })
 
   ctx.inject(['webServer'], (scoped) => {
@@ -389,6 +486,60 @@ export function apply(ctx, rawConfig) {
           return
         }
         sendFile(req, res, custom.path, custom.mime, false)
+      },
+    }))
+
+    // 浏览器读不到本机路径，所以「选择文件…」必须回到宿主开原生对话框。
+    scoped.effect(() => scoped.webServer.register({
+      kind: 'exact',
+      path: SPLASH_PICK_ROUTE,
+      handler: async (req, res) => {
+        if (guard(req, res)) return
+        if (req.method !== 'POST') {
+          res.writeHead(405, { Allow: 'POST' })
+          res.end()
+          return
+        }
+        let chosen
+        try {
+          chosen = await pickSplashMedia(ctx, settings().splashSrc)
+        } catch (error) {
+          ctx.logger.warn(`dsh-theme-su: 打开文件选择框失败（${error.code ?? error.message}）`)
+          chosen = undefined
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
+        res.end(JSON.stringify(chosen === undefined ? { ok: false, error: 'picker-unavailable' } : { ok: true, path: chosen }))
+      },
+    }))
+
+    // 只发当前生效的那一个文件；支持 Range，视频不必整段下载完才开始播。
+    scoped.effect(() => scoped.webServer.register({
+      kind: 'prefix',
+      path: SPLASH_MEDIA_ROUTE,
+      handler: (req, res) => {
+        if (guard(req, res)) return
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
+          res.writeHead(405, { Allow: 'GET, HEAD' })
+          res.end()
+          return
+        }
+        const media = resolveSplashMedia(settings().splashSrc, dshHome)
+        if (media.configured !== true || media.problem !== undefined) {
+          splashNotFound(res)
+          return
+        }
+        let requested
+        try {
+          requested = decodeURIComponent(String(req.url ?? '').slice(SPLASH_MEDIA_ROUTE.length).replace(/^\//, '').split('?')[0])
+        } catch {
+          splashNotFound(res)
+          return
+        }
+        if (requested !== media.name) {
+          splashNotFound(res)
+          return
+        }
+        serveSplashMedia(req, res, media)
       },
     }))
   })

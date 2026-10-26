@@ -1,8 +1,8 @@
 {
   "name": "dsh-theme-su",
-  "version": "0.0.1",
-  "description": "祀 —— DeepSeek Harness 主题：整页水墨长卷、毛玻璃侧栏、侧栏立绘轮换、设置页 Q 版吉祥物。",
-  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "theme", "beautify", "ink-wash"],
+  "version": "0.0.2",
+  "description": "祀 —— DeepSeek Harness 主题：整页水墨长卷、毛玻璃侧栏、侧栏立绘轮换、设置页 Q 版吉祥物，以及可换媒体的开屏动画。",
+  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "theme", "beautify", "ink-wash", "splash", "splash-screen", "boot-animation"],
   "license": "MIT",
   "type": "module",
   "main": "./index.js",
@@ -12,7 +12,7 @@
     "./package.json": "./package.json",
     "./cordis.patch.yml": "./cordis.patch.yml"
   },
-  "files": ["index.js", "client.js", "cordis.patch.yml", "assets", "docs", "README.md", "LICENSE"],
+  "files": ["index.js", "splash.js", "client.js", "cordis.patch.yml", "assets", "tools", "docs", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": { "platform": "web", "immediately": true, "inject": [] }
