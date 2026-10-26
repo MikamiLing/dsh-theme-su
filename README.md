@@ -10,7 +10,6 @@
 
 ## 安装
 
-从 GitHub 装（推荐，无需先克隆）：
 
 ```bash
 dsh plugin --profile <profile> add github:MikamiLing/dsh-theme-su
