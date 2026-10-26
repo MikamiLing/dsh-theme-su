@@ -1,10 +1,10 @@
 # 祀 · dsh-theme-su
 
-给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的水墨主题：**整页一张水墨长卷**，侧栏压一层毛玻璃，**角色从侧栏底部站起来**；纸色是暖象牙白，墨色是新墨，强调色是青玉。全部可调。
+ [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的水墨主题，部分样式全部可调。
 
-设计语言参考了社区里的「特蕾西娅」主题（整页背景 + 毛玻璃侧栏 + 侧栏立绘），但去掉了金线描边、落款签名与开屏动画，配色也换成配合这套素材的青玉/墨。
+设计语言参考了社区里的「特蕾西娅」主题。
 
-素材已内置在 `assets/` 里，开箱即用（版权归原画作者，见 [LICENSE](LICENSE)）：
+素材版权归原画作者，见 [LICENSE](LICENSE)）：
 
 
 ![祀 · 界面](docs/screenshot-light.png)
