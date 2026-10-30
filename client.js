@@ -37,7 +37,6 @@ window.__ModuleLoader__.load({
     const BASE = '/dsh-theme-su'
     const CONFIG_URL = `${BASE}/config.json`
     const SAVE_URL = `${BASE}/config`
-    const PICK_URL = `${BASE}/splash/pick`
     const STYLE_ID = 'dsh-theme-su-style'
     const MASCOT_ID = 'dsh-theme-su-mascot'
     const ROW_ID = 'dsh-theme-su'
@@ -53,6 +52,9 @@ window.__ModuleLoader__.load({
 
     /** 释放只能做一次：删掉规则后不能因为开屏卸载而重新生效。 */
     let coverReleased = false
+
+    /** 遮盖兜底计时器；只设一次，重复调用 armCoverDeadline 不会再排一个。 */
+    let coverDeadlineTimer = undefined
 
     /** 三套纸墨。纸色与墨色同时决定深浅两套画布。 */
     const ACCENTS = {
@@ -82,14 +84,7 @@ window.__ModuleLoader__.load({
       { id: 'fill', zh: '拉伸', en: 'Fill' },
     ]
 
-    const SPLASH_SKIPS = [
-      { id: 'button', zh: '按钮', en: 'Button' },
-      { id: 'click', zh: '点击任意处', en: 'Any click' },
-      { id: 'auto', zh: '自动', en: 'Auto' },
-      { id: 'never', zh: '不可跳过', en: 'Never' },
-    ]
-
-    /** 轮换池：四张同尺度的半身立绘。 */
+/** 轮换池：四张同尺度的半身立绘。 */
     const ROTATION = ['bust', 'su', 'side', 'front']
 
     /** 立绘 id → 资源目录里的键（side/front 的资源名带 bust- 前缀，不能直接拿 id 取）。 */
@@ -116,7 +111,7 @@ window.__ModuleLoader__.load({
         glassHint: '侧栏后面的画面会做一次模糊，像糊了一层宣纸。',
         accent: '纸墨',
         splashSection: '开屏动画',
-        splashIntro: '打开或刷新页面时先播一段视频/动图，播完淡出。留空使用内置开场，也可以换成自己的文件。',
+        splashIntro: '打开或刷新页面时先播一段视频，播完淡出。素材固定为内置的那一对（视频 + 首帧海报），所以启动时不会先黑一下。',
         splashEnabled: '启用开屏动画',
         splashOn: '下次打开或刷新页面时播放。',
         splashOff: '已关闭 —— 启动时直接进入界面。',
@@ -133,6 +128,7 @@ window.__ModuleLoader__.load({
         splashDuration: '最长播放',
         splashDurationHint: '0 = 播到结尾；大于 0 时到点就淡出。',
         splashCurrent: '当前开场',
+    splashFixedHint: '面板不再提供换片：要换开屏，把 splashSrc 和配套的 splashPosterSrc 一起写进 config.json。只换视频不配海报会退回纯色，不会贴错图。',
         splashBuiltinName: '内置开场视频',
         splashNextReload: '开屏动画的改动在下次刷新页面后生效。',
         splashSaved: '已保存。开屏动画改动下次刷新页面生效。',
@@ -172,7 +168,7 @@ window.__ModuleLoader__.load({
         glassHint: 'Blurs the backdrop behind the sidebar.',
         accent: 'Paper & ink',
         splashSection: 'Splash animation',
-        splashIntro: 'Play a video or animated image over the page when it opens or reloads, then fade it out. Leave the path empty to use the bundled opening, or choose your own file.',
+        splashIntro: 'Plays a video over the page when it opens or reloads, then fades out. The bundled pair (video + first-frame poster) is fixed, so there is no black flash.',
         splashEnabled: 'Enable splash',
         splashOn: 'Plays the next time the page opens or reloads.',
         splashOff: 'Off — DSH goes straight to the interface.',
@@ -189,6 +185,7 @@ window.__ModuleLoader__.load({
         splashDuration: 'Max runtime',
         splashDurationHint: '0 = play to the end; a positive value fades out at that mark.',
         splashCurrent: 'Current opening',
+    splashFixedHint: 'Not swappable here: to change the opening, set splashSrc together with a matching splashPosterSrc in config.json. A video without a poster falls back to a solid colour rather than showing the wrong frame.',
         splashBuiltinName: 'Bundled opening video',
         splashNextReload: 'Splash changes take effect after the next page reload.',
         splashSaved: 'Saved. Splash changes take effect after the next page reload.',
@@ -274,6 +271,69 @@ window.__ModuleLoader__.load({
       return ROTATION[hash % ROTATION.length]
     }
 
+    /** 最近显示过的两张，用来避免连着切会话都是同一张。 */
+    let recentPortraits = []
+    /** 上一次真正画到侧栏上的那张：设置页预览、提示文字，以及"同一会话重复渲染"都读它。 */
+    let lastShownPortrait = ''
+    /** 上一次画立绘时对应的会话 id，用来区分"换了会话"和"同一个会话重绘了一次"。 */
+    let lastLiveKey = null
+
+    /**
+     * 侧栏实际要画的那张立绘。
+     *
+     * 规则有意做成"轻量轮换"而不是固定档案：
+     *   - 以会话 id 映射出的那张为起点，但不再把它和会话锁死；
+     *   - 如果起点落在最近两张里，就顺延到空位——所以连续切换一定换人；
+     *   - 因为不记档案，**回到同一个会话时看到的也可能是另一张**。
+     * 代价是不保证"同一个人"，换来的是每次切换都有变化；想固定就用设置里的单张。
+     *
+     * 同一个会话的重复渲染（保存设置、改纸色这类重绘）不会重新抽，否则画面会乱跳。
+     * @param settings - 完整配置。
+     * @returns 立绘 id。
+     */
+    function portraitForLive(settings) {
+      const key = String(sessionKey ?? '')
+      const fixed = settings.portrait !== 'rotate'
+
+      // 固定某一张 / 不显示：直接用它，不参与轮换。
+      if (fixed) {
+        const id = resolvePortrait(settings, key)
+        recentPortraits = [id]
+        lastShownPortrait = id
+        lastLiveKey = key
+        return id
+      }
+
+      // 同一会话的重绘：保持屏幕上的那张，不重新抽。
+      if (key === lastLiveKey && lastShownPortrait !== '') {
+        recentPortraits = [lastShownPortrait, ...recentPortraits.filter((id) => id !== lastShownPortrait)].slice(0, 2)
+        return lastShownPortrait
+      }
+
+      let index = ROTATION.indexOf(resolvePortrait(settings, key))
+      for (let guard = 0; guard < ROTATION.length && recentPortraits.includes(ROTATION[index]); guard += 1) {
+        index = (index + 1) % ROTATION.length
+      }
+      const shown = ROTATION[index]
+      recentPortraits = [shown, ...recentPortraits].slice(0, 2)
+      lastShownPortrait = shown
+      lastLiveKey = key
+      return shown
+    }
+
+    /**
+     * 屏幕上当前那张立绘（只读，不再抽一次）。
+     *
+     * 设置页的即时预览和「当前是「素衣」」这句提示都用它，保证和侧栏一致。
+     * @param settings - 完整配置。
+     * @returns 立绘 id。
+     */
+    function currentPortraitId(settings) {
+      if (settings.portrait === 'none') return 'none'
+      if (settings.portrait !== 'rotate') return settings.portrait
+      return lastShownPortrait !== '' ? lastShownPortrait : resolvePortrait(settings, sessionKey)
+    }
+
     /**
      * 同步读配置：主题必须在首帧之前就知道自己该上什么色，
      * 异步 fetch 做不到（至少要跨一个任务），所以这里故意用同步 XHR。
@@ -336,6 +396,27 @@ window.__ModuleLoader__.load({
           else if (node.parentNode !== null) node.parentNode.removeChild(node)
         }
       } catch { /* 露出界面不能抛错 */ }
+    }
+
+    /**
+     * 首帧遮盖的硬期限。
+     *
+     * 释放本来只有一个时机：开屏层挂载时调 `releaseCover()`。这条路依赖宿主
+     * 真的把 overlay 槽位渲染出来——槽位缺失、注册被吞、组件渲染抛错，遮盖就
+     * 会一直留着，界面黑到宿主注入的那 10 秒兜底脚本为止；兜底脚本本身也可能
+     * 不在（注入表只认 style 行时就没有），那就是永久黑屏。
+     *
+     * 开屏层在屏上时是一层不透明的全屏节点，此时把宿主遮盖删掉看不出任何变化，
+     * 所以这里可以无条件设一个期限：过了这个点，界面必须露出来。
+     * @param settings - 当前配置；用 splashWaitForAppMs 作为期限。
+     */
+    function armCoverDeadline(settings) {
+      if (coverReleased || typeof window === 'undefined' || coverDeadlineTimer !== undefined) return
+      const wait = Number(settings?.splashWaitForAppMs)
+      const ms = Number.isFinite(wait) && wait > 0 ? wait : 2500
+      try {
+        coverDeadlineTimer = window.setTimeout(releaseCover, ms)
+      } catch { /* 没有计时器就只能靠开屏层自己释放 */ }
     }
 
     /** @returns 当前要用的 `object-fit` 关键字。 */
@@ -668,9 +749,29 @@ window.__ModuleLoader__.load({
         }))
       }
 
-      // 视频在解出第一帧前是透明的；先盖一层与开屏底色相同的实色，避免界面
-      // 从尚未解码的视频里透出来。
-      if (media.kind === 'video' && !paintable) {
+      // 视频在解出第一帧前是透明的。自带视频配了一张首帧海报：先把它顶在上面，
+      // 解出第一帧后再淡出，黑屏就变成了"画面立刻出现"。用户自带视频没有海报，
+      // 退回实色遮罩，避免界面从尚未解码的视频里透出来。
+      const poster = media.kind === 'video' ? (current.splash?.poster?.url ?? null) : null
+      if (media.kind === 'video' && poster !== null) {
+        children.push(h('img', {
+          key: 'poster',
+          src: poster,
+          alt: '',
+          'aria-hidden': true,
+          style: {
+            position: 'absolute',
+            inset: 0,
+            zIndex: 2,
+            width: '100%',
+            height: '100%',
+            objectFit: fit,
+            pointerEvents: 'none',
+            opacity: paintable ? 0 : 1,
+            transition: paintable ? 'opacity 200ms ease' : 'none',
+          },
+        }))
+      } else if (media.kind === 'video' && !paintable) {
         children.push(h('div', {
           key: 'cover',
           'aria-hidden': true,
@@ -766,7 +867,7 @@ window.__ModuleLoader__.load({
         : custom !== ''
           ? catalog.custom ?? null
           : catalog[`wallpaper-${settings.wallpaper}`] ?? null
-      const portrait = portraitId ?? resolvePortrait(settings, sessionKey)
+      const portrait = portraitId ?? currentPortraitId(settings)
       const assetKey = PORTRAIT_ASSET[portrait]
       const portraitUrl = portrait === 'none' ? null : catalog[assetKey] ?? null
       const box = PORTRAIT_BOX[portrait] ?? PORTRAIT_BOX.bust
@@ -1046,10 +1147,40 @@ filter:brightness(1.04) saturate(0.96);
       }
     }
 
+    /**
+     * 用开屏首帧顶住 body 背景，直到开屏真正盖上来。
+     *
+     * 宿主已经在首帧样式里放了一张海报，但客户端注入的主题样式表排在它后面
+     * （同样是 !important），会把 body 的 background-image 改回主题壁纸，于是
+     * 模块执行完到开屏挂载之间会闪一下壁纸。补这一层带 `splash-base` 标记的
+     * 样式，顺序在主题样式之后，并且会被 releaseCover() 一并清掉。
+     * @param state - 当前的 `{ settings, catalog, splash }`。
+     */
+    function installSplashPoster(state) {
+      try {
+        if (typeof document === 'undefined') return
+        if (state?.splash?.engaged !== true) return
+        if (state?.splash?.media?.kind !== 'video') return
+        const poster = state?.splash?.poster?.url
+        if (typeof poster !== 'string') return
+        const background = state?.settings?.splashBackground ?? '#000000'
+        // 与视频的 object-fit 对齐：fill 拉伸、cover 裁切、contain/adaptive 留边。
+        // 海报铺法不一致会在"海报 → 视频"的交接瞬间看到一次拉伸跳变。
+        const fit = state?.settings?.splashFit
+        const size = fit === 'fill' ? '100% 100%' : fit === 'cover' ? 'cover' : 'contain'
+        const tag = document.createElement('style')
+        tag.dataset.plugin = 'dsh-theme-su'
+        tag.textContent = '/* dsh-theme-su-splash-base */ html,body{'
+          + `background-color:${background}!important;`
+          + `background-image:url("${poster}")!important;`
+          + `background-size:${size}!important;background-position:center!important;background-repeat:no-repeat!important}`
+        document.head.append(tag)
+      } catch { /* 海报顶不住也只是回到纯色，不影响开屏 */ }
+    }
     function render(settings, catalog, key, splash) {
       if (typeof key === 'string' && key !== '') sessionKey = key
       current = { settings, catalog: catalog ?? {}, splash: splash ?? current.splash }
-      applyStyle(cssFor(settings, catalog ?? {}))
+      applyStyle(cssFor(settings, catalog ?? {}, portraitForLive(settings)))
       applyFavicon(catalog ?? {})
       if (settings.enabled === true) {
         ensureMascot(catalog ?? {})
@@ -1058,6 +1189,29 @@ filter:brightness(1.04) saturate(0.96);
         mascotNode.style.opacity = '0'
         mascotNode.style.display = 'none'
       }
+    }
+
+    /** 用当前会话重画一次样式表；会话切换只跑到这里。 */
+    function applyLiveStyle() {
+      if (current.settings === null) return
+      applyStyle(cssFor(current.settings, current.catalog, portraitForLive(current.settings)))
+    }
+
+    /**
+     * 侧栏里被选中的那个会话 id。
+     *
+     * 列表行由 DSH 自己维护选中态（`aria-selected`），这是"屏幕上正在看哪个
+     * 会话"最可靠的信号；比从 session store 的引用计数里猜要准得多——多个
+     * 会话同时被 retain 时，猜出来的永远是其中固定的一个，画面就再也不变了。
+     * @returns 会话 id，或 undefined。
+     */
+    function selectedSessionId() {
+      try {
+        const row = document.querySelector('[data-row-key^="session:"][aria-selected="true"]')
+        const key = row?.getAttribute('data-row-key')
+        if (typeof key === 'string' && key.startsWith('session:')) return key.slice('session:'.length)
+      } catch { /* 没有 DOM 就退回 store */ }
+      return undefined
     }
 
     /**
@@ -1074,6 +1228,13 @@ filter:brightness(1.04) saturate(0.96);
     function watchSessions(ctx, onChange) {
       const cleanups = []
 
+      /** 把屏幕上选中的会话上报一次；同一会话重复上报不会有副作用。 */
+      const report = () => {
+        const id = selectedSessionId()
+        if (id !== undefined) onChange(id)
+      }
+
+      // 1) 点击侧栏行：立刻响应，不等观察器。
       try {
         const onClick = (event) => {
           const target = event.target
@@ -1086,13 +1247,25 @@ filter:brightness(1.04) saturate(0.96);
         }
         document.addEventListener('click', onClick, true)
         cleanups.push(() => document.removeEventListener('click', onClick, true))
-      } catch { /* 没有 DOM 就只靠 store */ }
+      } catch { /* 没有 DOM 就只靠观察器 */ }
 
+      // 2) 选中态变化：覆盖搜索面板、快捷键、程序化切换这些不点列表的路径。
+      //    `aria-selected` 由 DSH 自己维护，是"正在看哪个会话"最直接的信号。
+      try {
+        const observer = new MutationObserver(report)
+        observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['aria-selected'] })
+        cleanups.push(() => observer.disconnect())
+        report()
+      } catch { /* 没有 MutationObserver 时靠 store */ }
+
+      // 3) store 兜底：连选中态都读不到时，退回引用计数里找 mainView 持有的那个。
       try {
         const sessions = ctx.get('sessions')
         const list = sessions?.list
         if (list !== undefined && typeof list.subscribe === 'function' && typeof list.getSnapshot === 'function') {
           const readCurrent = () => {
+            const fromDom = selectedSessionId()
+            if (fromDom !== undefined) return fromDom
             const snapshot = list.getSnapshot()
             const rows = snapshot?.byId !== undefined ? Object.values(snapshot.byId) : []
             return rows.find((row) => (row?.retainedBy?.mainView ?? 0) > 0)?.id
@@ -1255,16 +1428,6 @@ filter:brightness(1.04) saturate(0.96);
     }
 
     /** 开屏路径输入框。 */
-    const SPLASH_FIELD = {
-      flex: '1 1 auto',
-      minWidth: 0,
-      padding: '6px 9px',
-      fontSize: '12px',
-      borderRadius: 'calc(9px * var(--dtv-r, 1))',
-      border: '0.5px solid var(--dsw-alias-border-l3, rgba(0,0,0,.15))',
-      background: 'var(--dsw-alias-bg-layer-1, #fff)',
-      color: 'var(--dsw-alias-label-primary, #1b2620)',
-    }
 
     function SettingsPanel() {
       const t = strings()
@@ -1272,7 +1435,6 @@ filter:brightness(1.04) saturate(0.96);
       const [busy, setBusy] = React.useState(false)
       const [notice, setNotice] = React.useState(null)
       const [dirty, setDirty] = React.useState(false)
-      const [pickError, setPickError] = React.useState(null)
 
       React.useEffect(() => {
         applyStyle(draft.enabled === true ? cssFor(draft, current.catalog) : '')
@@ -1282,7 +1444,6 @@ filter:brightness(1.04) saturate(0.96);
         setDraft((prev) => ({ ...prev, ...fields }))
         setDirty(true)
         setNotice(null)
-        setPickError(null)
       }
 
       const save = async (next) => {
@@ -1311,31 +1472,6 @@ filter:brightness(1.04) saturate(0.96);
           render(current.settings, current.catalog, undefined, current.splash)
         } catch {
           setNotice(null)
-        } finally {
-          setBusy(false)
-        }
-      }
-
-      const chooseSplash = async () => {
-        setBusy(true)
-        setPickError(null)
-        try {
-          const response = await fetch(PICK_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: '{}',
-          })
-          const payload = await response.json()
-          if (payload.ok === true) {
-            // 空路径 = 用户取消了对话框，保持原样。
-            if (typeof payload.path === 'string' && payload.path !== '') patch({ splashSrc: payload.path })
-          } else {
-            setPickError(payload.error === 'picker-unavailable'
-              ? t.splashPickUnavailable
-              : (t.splashProblem['load-failed'] ?? null))
-          }
-        } catch {
-          setPickError(t.splashProblem['load-failed'] ?? null)
         } finally {
           setBusy(false)
         }
@@ -1416,7 +1552,7 @@ filter:brightness(1.04) saturate(0.96);
             key: 'portrait',
             label: t.portrait,
             hint: draft.portrait === 'rotate'
-              ? (zh ? `轮换中：当前是「${PORTRAITS.find((item) => item.id === resolvePortrait(draft, sessionKey))?.zh ?? '轮换'}」，切换对话会自动换一张。` : 'Rotating: switches with the active conversation.')
+              ? (zh ? `轮换中：当前是「${PORTRAITS.find((item) => item.id === currentPortraitId(draft))?.zh ?? '轮换'}」，切换对话会自动换一张。` : 'Rotating: switches with the active conversation.')
               : undefined,
           },
             h(Chips, {
@@ -1454,95 +1590,11 @@ filter:brightness(1.04) saturate(0.96);
           }, h(Toggle, { value: draft.splashEnabled, onChange: (value) => patch({ splashEnabled: value }) })),
 
           draft.splashEnabled !== true ? null : h(React.Fragment, { key: 'splashBody' }, [
-            h('div', {
-              key: 'splashSrc',
-              style: { padding: '11px 0', borderTop: '0.5px solid var(--dsw-alias-border-l1, rgba(0,0,0,.06))' },
-            }, [
-              h('div', {
-                key: 'label',
-                style: { fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary, #1b2620)' },
-              }, t.splashSrc),
-              h('div', {
-                key: 'hint',
-                style: { marginTop: '3px', fontSize: '12px', lineHeight: 1.5, color: 'var(--dsw-alias-label-tertiary, #6e7c72)' },
-              }, t.splashSrcHint),
-              h('div', {
-                key: 'row',
-                style: { display: 'flex', gap: '8px', alignItems: 'center', marginTop: '8px' },
-              }, [
-                h('input', {
-                  key: 'input',
-                  type: 'text',
-                  value: draft.splashSrc,
-                  spellCheck: false,
-                  placeholder: 'D:\\videos\\opening.mp4',
-                  onChange: (event) => patch({ splashSrc: event.target.value }),
-                  style: SPLASH_FIELD,
-                }),
-                h(Button, { key: 'choose', label: t.splashChoose, disabled: busy, onClick: chooseSplash }),
-                h(Button, {
-                  key: 'builtin',
-                  label: t.splashBuiltin,
-                  disabled: busy || draft.splashSrc === '',
-                  onClick: () => patch({ splashSrc: '' }),
-                }),
-              ]),
-              pickError === null ? null : h('div', {
-                key: 'pickError',
-                role: 'alert',
-                style: { marginTop: '6px', fontSize: '12px', color: 'var(--dsw-alias-state-error-primary, #e5484d)' },
-              }, pickError),
-              h('div', {
-                key: 'reload',
-                style: { marginTop: '6px', fontSize: '11.5px', color: 'var(--dsw-alias-label-tertiary, #6e7c72)' },
-              }, t.splashNextReload),
-            ]),
-
             h(Row, { key: 'splashFit', label: t.splashFit, align: 'top' },
               h(Chips, {
                 value: draft.splashFit,
                 options: SPLASH_FITS.map((item) => ({ id: item.id, label: zh ? item.zh : item.en })),
                 onChange: (value) => patch({ splashFit: value }),
-              })),
-
-            h(Row, { key: 'splashSkip', label: t.splashSkip, align: 'top' },
-              h(Chips, {
-                value: draft.splashSkip,
-                options: SPLASH_SKIPS.map((item) => ({ id: item.id, label: zh ? item.zh : item.en })),
-                onChange: (value) => patch({ splashSkip: value }),
-              })),
-
-            h(Row, { key: 'splashMuted', label: t.splashMuted },
-              h(Toggle, { value: draft.splashMuted, onChange: (value) => patch({ splashMuted: value }) })),
-
-            draft.splashMuted === true ? null : h(Row, { key: 'splashVolume', label: t.splashVolume },
-              h(Slider, {
-                value: draft.splashVolume,
-                min: 0,
-                max: 1,
-                step: 0.05,
-                unit: '',
-                onChange: (value) => patch({ splashVolume: value }),
-              })),
-
-            h(Row, { key: 'splashFadeOut', label: t.splashFadeOut },
-              h(Slider, {
-                value: draft.splashFadeOutMs,
-                min: 0,
-                max: 2000,
-                step: 50,
-                unit: 'ms',
-                onChange: (value) => patch({ splashFadeOutMs: value }),
-              })),
-
-            h(Row, { key: 'splashDuration', label: t.splashDuration, hint: t.splashDurationHint },
-              h(Slider, {
-                value: draft.splashDuration,
-                min: 0,
-                max: 30000,
-                step: 500,
-                unit: 'ms',
-                onChange: (value) => patch({ splashDuration: value }),
               })),
 
             h('div', {
@@ -1562,6 +1614,10 @@ filter:brightness(1.04) saturate(0.96);
                 key: 'title',
                 style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary, #1b2620)', wordBreak: 'break-all' },
               }, `${t.splashCurrent}: ${splashName}`),
+              h('div', {
+                key: 'hint',
+                style: { marginTop: '4px', fontSize: '12px', color: 'var(--dsw-alias-label-tertiary, #6e7c72)' },
+              }, t.splashFixedHint),
               splashProblem === null ? null : h('div', {
                 key: 'problem',
                 role: 'alert',
@@ -1592,6 +1648,11 @@ filter:brightness(1.04) saturate(0.96);
     return {
       inject: ['slots'],
       apply(ctx) {
+        // 最先布下的保险：后面读配置、建节点、注册槽位哪一步抛错，界面都不会
+        // 被宿主那段「藏 #root + 黑底」锁死。此时配置还没读到，先用默认期限；
+        // 开屏层一旦在屏上，这段遮盖删掉是看不出来的，所以早点排定无害。
+        armCoverDeadline(current.settings)
+
         const initial = readConfigSync()
         if (initial !== undefined && typeof initial.settings === 'object') {
           current = {
@@ -1603,35 +1664,48 @@ filter:brightness(1.04) saturate(0.96);
         // 同步落下样式：这一步在首帧之前，不会看到默认配色。
         render(current.settings ?? DEFAULTS, current.catalog, undefined, current.splash)
 
-        ctx.slots.inject(TAB_SLOT, () => ctx.slots.register(
-          { name: TAB_SLOT, id: ROW_ID, order: 40, label: () => strings().tab },
-          SettingsPanel,
-        ))
+        // 主题样式表在宿主那段首帧样式之后才落地，会把 body 上的开屏海报底盖掉。
+        // 这里补一层带同样标记的样式保住海报，它会随开屏释放（releaseCover）一起删掉。
+        installSplashPoster(current)
 
-        // 开屏只在「启用 + 媒体可播」时注册。同步读配置让这个决定留在首帧之前，
-        // 不会出现界面先露一下、再被开屏盖住的情况。
+        // 开屏优先注册：它是唯一负责释放宿主首帧遮盖的东西，比设置页重要。
+        // 槽位缺失时绝不能让 apply() 抛错——一旦抛在这里，主题精细样式、侧栏
+        // 立绘和开屏层全都没上，而宿主注入的「藏起 #root + 黑底」还在，界面就
+        // 一直黑到宿主那 10 秒兜底（注入表不认 script 行时是永久黑）。
         const splash = current.splash
         if (current.settings?.splashEnabled === true
           && splash?.media?.kind !== undefined
           && splash.media.kind !== 'none'
           && splash.problem == null) {
-          ctx.slots.inject(OVERLAY_SLOT, () => ctx.slots.register(
-            { name: OVERLAY_SLOT, id: SPLASH_ROW_ID, order: 900 },
-            SplashRoot,
-          ))
+          try {
+            ctx.slots.inject(OVERLAY_SLOT, () => ctx.slots.register(
+              { name: OVERLAY_SLOT, id: SPLASH_ROW_ID, order: 900 },
+              SplashRoot,
+            ))
+          } catch {
+            // 开屏挂不上就别留着遮盖，宁可没有开屏也不能黑屏。
+            releaseCover()
+          }
         } else {
           // 没有开屏会来释放宿主遮盖；这里主动释放一次，避免配置读取与宿主
           // 注入判断之间的瞬间分歧把界面锁黑。
           releaseCover()
         }
 
+        // 设置页只影响面板本身，失败不能牵连主题与开屏。
+        try {
+          ctx.slots.inject(TAB_SLOT, () => ctx.slots.register(
+            { name: TAB_SLOT, id: ROW_ID, order: 40, label: () => strings().tab },
+            SettingsPanel,
+          ))
+        } catch { /* 没有设置页也照样跑主题 */ }
+
         // 切换对话时重画立绘：只重算样式表，不动其余状态。
         try {
           ctx.effect(() => watchSessions(ctx, (key) => {
             if (key === sessionKey) return
             sessionKey = key
-            if (current.settings === null) return
-            applyStyle(cssFor(current.settings, current.catalog))
+            applyLiveStyle()
           }), 'dsh-theme-su: follow the active session')
         } catch { /* 没有 session 服务时保持静态立绘 */ }
 

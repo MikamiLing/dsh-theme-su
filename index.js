@@ -22,9 +22,11 @@ import { fileURLToPath } from 'node:url'
 import {
   SPLASH_MEDIA_ROUTE,
   SPLASH_PICK_ROUTE,
+  SPLASH_POSTER_ROUTE,
   notFound as splashNotFound,
   pickSplashMedia,
   resolveSplashMedia,
+  resolveSplashPoster,
   serveSplashMedia,
   splashWire,
 } from './splash.js'
@@ -80,9 +82,11 @@ export const DEFAULTS = {
   radius: 1,
   accent: 'si',
   tint: 100,
-  // 开屏动画。splashSrc 为空表示使用自带的 splash-default.mp4。
+  // 开屏动画。splashSrc 为空表示使用自带的 splash-default.mp4；
+  // splashPosterSrc 为空表示用它配套的首帧海报（两者成对，不在设置面板里暴露）。
   splashEnabled: true,
   splashSrc: '',
+  splashPosterSrc: '',
   splashFit: 'fill',
   splashSkip: 'button',
   splashSkipAfterMs: 1200,
@@ -309,6 +313,7 @@ export function apply(ctx, rawConfig) {
       icon: url('icon-256.png'),
       mascot: url('mascot.webp'),
       banner: url('banner.webp'),
+      'splash-poster': url('splash-poster.jpg'),
     }
   }
 
@@ -331,6 +336,15 @@ export function apply(ctx, rawConfig) {
     }
   }
 
+  /**
+   * 自带首帧海报的 URL。
+   *
+   * 这里必须显式传给 splashWire：缺了它，/config.json 里 `splash.poster.url` 就是
+   * null，客户端开屏层只能铺一层纯黑 div 顶到视频解出第一帧为止——宿主的首帧
+   * 样式虽然有海报，但客户端样式一挂上来就被盖掉了。0.0.5 修的就是这一处。
+   */
+  const bundledPosterUrl = () => (bundled.has('splash-poster.jpg') ? `${ASSET_ROUTE}/splash-poster.jpg` : null)
+
   const wire = () => {
     const current = settings()
     const art = artworkFor(current)
@@ -340,7 +354,7 @@ export function apply(ctx, rawConfig) {
       catalog: art.catalog,
       assets: art,
       engaged: current.enabled === true,
-      splash: splashWire(current, dshHome),
+      splash: splashWire(current, dshHome, bundledPosterUrl()),
     }
   }
 
@@ -358,15 +372,33 @@ export function apply(ctx, rawConfig) {
       // 开屏动画会接管首帧：先把 shell 自己的加载层和应用藏起来，等客户端把
       // 开屏挂好、渲染完第一帧后再一次性释放。释放由客户端删掉这些规则完成，
       // 是单向的，不会因为开屏卸载而重新生效。
-      const splash = splashWire(current, dshHome)
+      const bundledPosterUrl = bundled.has('splash-poster.jpg') ? `${ASSET_ROUTE}/splash-poster.jpg` : null
+      const splash = splashWire(current, dshHome, bundledPosterUrl)
       if (!splash.engaged) return
       if (table.some((row) => row && row.kind === 'style' && typeof row.text === 'string' && row.text.includes('dsh-theme-su-splash-boot'))) return
+
+      // 海报必须和视频用同一种铺法。视频的 object-fit 由 splashFit 决定，海报的
+      // background-size 也要跟着变：默认的 fill 是拉伸铺满，用 cover 会裁切，
+      // 交接那一瞬间就会看到一次"画面被拉开/裁掉"的跳变。
+      // adaptive 的前景是 contain，海报同它对齐。
+      const posterSize = current.splashFit === 'fill'
+        ? '100% 100%'
+        : current.splashFit === 'cover' ? 'cover' : 'contain'
+      const posterUrl = splash.poster?.url ?? null
 
       table.push({
         kind: 'style',
         text: '/* dsh-theme-su-splash-boot */ [data-dsh-boot]:has([data-dsh-boot-spinner]){display:none!important}'
           + '/* dsh-theme-su-splash-cover */ #root{visibility:hidden!important}'
-          + `/* dsh-theme-su-splash-base */ html,body{background-color:${current.splashBackground}!important}`,
+          // 首帧就用开屏的第一帧当底：纯黑会让人以为卡住了，而这张图与视频第 0 帧
+          // 一致，等客户端把视频挂上来时是无缝接续的。没有海报（用户自带视频却
+          // 没配海报）就退回实色。
+          + `/* dsh-theme-su-splash-base */ html,body{background-color:${current.splashBackground}!important${
+            posterUrl === null
+              ? ''
+              : `;background-image:url("${posterUrl}")!important`
+                + `;background-size:${posterSize}!important;background-position:center!important;background-repeat:no-repeat!important`
+          }}`,
       })
 
       // 客户端模块万一没跑起来（打包残缺、插件被停用），也必须有一条有界的
@@ -512,6 +544,31 @@ export function apply(ctx, rawConfig) {
       },
     }))
 
+    // 自选首帧海报：只走配置（splashPosterSrc），设置面板里没有入口。
+    // 填了视频却没配海报时这里返回 404，客户端据此退回纯色遮罩。
+    scoped.effect(() => scoped.webServer.register({
+      kind: 'exact',
+      path: SPLASH_POSTER_ROUTE,
+      handler: (req, res) => {
+        if (guard(req, res)) return
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
+          res.writeHead(405, { Allow: 'GET, HEAD' })
+          res.end()
+          return
+        }
+        const current = settings()
+        const poster = resolveSplashPoster(current, resolveSplashMedia(current.splashSrc, dshHome), dshHome)
+        if (poster === undefined) {
+          splashNotFound(res)
+          return
+        }
+        if (poster.source === 'chosen') {
+          sendFile(req, res, poster.path, poster.mime, false)
+          return
+        }
+        splashNotFound(res)
+      },
+    }))
     // 只发当前生效的那一个文件；支持 Range，视频不必整段下载完才开始播。
     scoped.effect(() => scoped.webServer.register({
       kind: 'prefix',

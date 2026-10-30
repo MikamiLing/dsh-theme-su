@@ -1,6 +1,6 @@
 {
   "name": "dsh-theme-su",
-  "version": "0.0.2",
+  "version": "0.1.1",
   "description": "祀 —— DeepSeek Harness 主题：整页水墨长卷、毛玻璃侧栏、侧栏立绘轮换、设置页 Q 版吉祥物，以及可换媒体的开屏动画。",
   "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "theme", "beautify", "ink-wash", "splash", "splash-screen", "boot-animation"],
   "license": "MIT",

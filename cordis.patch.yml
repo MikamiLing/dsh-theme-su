@@ -1,7 +1,8 @@
-# dsh-theme-su — bundle patch
+# dsh-theme-su —— 把主题接入 profile。
 #
-# 把主题插进 profile 的配置树。想覆盖默认值就在 profile 的 cordis.patch.yml 里
-# 写同 id 的行（例：- id: dsh-theme-su / config: { accent: ink }）。
+# 想用配置文件覆盖默认设置，在 profile 的 cordis.patch.yml 里加一条同 id 的行：
+#   - id: dsh-theme-su
+#     config: { accent: ink, scrim: 60 }
 
 - insert:
     - id: dsh-theme-su

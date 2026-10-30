@@ -1,9 +1,9 @@
-祀 · dsh-theme-su  v0.0.2  ——  手动安装说明
+祀 · dsh-theme-su  v0.1.1  ——  手动安装说明
 ==================================================
 
-这个压缩包是一个完整的 DeepSeek Harness 主题插件，素材已内置，
-不需要额外的图片文件，也不需要联网安装依赖（零运行时依赖、无构建步骤）。
-v0.0.2 起还包含开屏动画：默认播放内置短片，可在设置里换成自己的视频/动图。
+这是 DeepSeek Harness 的水墨主题插件：整页长卷背景、侧栏立绘轮换、
+设置页吉祥物，以及一段可以换素材的开屏动画。
+素材已内置，无需联网安装依赖，也没有构建步骤。
 
 
 一、解压
@@ -13,29 +13,29 @@ v0.0.2 起还包含开屏动画：默认播放内置短片，可在设置里换�
     D:\dsh-theme-su
 
 解压后该目录里应该有：index.js、splash.js、client.js、cordis.patch.yml、
-package.json、assets\、tools\、README.md。请让这个目录保持不动，
-后面 profile 用绝对路径指向它。
+package.json、assets\、tools\、docs\、README.md。
+请让这个目录保持在这个位置，下一步的 profile 会用绝对路径指向它。
 
 
-二、找到你的 profile 目录
-------------------------
+二、找到 profile 目录
+--------------------
 DSH 的用户目录默认是：
 
     %USERPROFILE%\.dsh          （即 C:\Users\<你的用户名>\.dsh）
 
 profile 在它下面的 profiles\ 里，常见两个：
 
-    ...\.dsh\profiles\desktop   ← DeepSeek Harness 桌面版用的就是这个
+    ...\.dsh\profiles\desktop   ← 桌面版用的就是这个
     ...\.dsh\profiles\web       ← 命令行 dsh web 用的
 
-不确定用哪个？打开 DSH 桌面版，用任务管理器看进程命令行里带
-profiles\desktop 还是 profiles\web，或者干脆两个都装（互不影响）。
+不确定用哪个？打开 DSH，用任务管理器看进程命令行里带的是哪一个，
+或者两个都装（互不影响）。
 
 
 三、改 profile 的 package.json
 ------------------------------
-用记事本/VS Code 打开该目录下的 package.json，改成这样
-（保留你原有的其它依赖和 bundles，只加 dsh-theme-su 这一项）：
+用记事本或 VS Code 打开该目录下的 package.json，在保留原有内容的
+前提下加上 dsh-theme-su 这一项，改完形如：
 
 {
   "name": "dsh-profile-desktop",
@@ -55,25 +55,24 @@ profiles\desktop 还是 profiles\web，或者干脆两个都装（互不影响�
 }
 
 注意：
-  * dependencies 里写的是你第一步的解压路径，反斜杠要写成两个 \\
-  * bundles 里必须同时加上 "dsh-theme-su"，否则插件不会被加载
-  * 保存时用 UTF-8，不要存成 ANSI
+  * dependencies 里写第一步解压出来的路径，反斜杠要写成两个 \\
+  * bundles 里也要加上 "dsh-theme-su"，否则插件不会被加载
+  * 文件保存为 UTF-8，不要存成 ANSI
 
 
-四、安装（把 link 依赖落到 node_modules）
-----------------------------------------
-在该 profile 目录里执行一次 pnpm install。DSH 桌面版自带 pnpm，
-路径形如：
-
-    "<DSH安装目录>\resources\runtime\primary-runtime\dependencies\node\bin\node.exe" ^
-    "<DSH安装目录>\resources\runtime\primary-runtime\dependencies\pnpm\bin\pnpm.mjs" install
-
-也可以直接用系统里的 pnpm：
+四、安装依赖
+------------
+在该 profile 目录里执行一次 pnpm install：
 
     cd %USERPROFILE%\.dsh\profiles\desktop
     pnpm install
 
-成功的话会看到一行：+ dsh-theme-su 0.0.2 <- D:\dsh-theme-su
+没有 pnpm 的话，DSH 桌面版自带一份，路径形如：
+
+    "<DSH安装目录>\resources\runtime\primary-runtime\dependencies\node\bin\node.exe" ^
+    "<DSH安装目录>\resources\runtime\primary-runtime\dependencies\pnpm\bin\pnpm.mjs" install
+
+成功的话会看到一行：+ dsh-theme-su 0.1.1 <- D:\dsh-theme-su
 
 
 五、重启 DSH
@@ -83,37 +82,38 @@ profiles\desktop 还是 profiles\web，或者干脆两个都装（互不影响�
 
 六、确认生效
 ------------
-  * 启动后界面应该是象牙白纸色 + 水墨长卷背景
-  * 侧栏底部站着角色立绘（切换对话会换一张）
-  * 设置 → 内置插件 → 「祀」 里有全部参数（含「开屏动画」一节）
-  * 设置界面左下角会出现 Q 版吉祥物
+  * 界面变成象牙白纸色 + 水墨长卷背景
+  * 侧栏底部站着角色立绘，切换对话会换一张
+  * 设置 → 内置插件 → 「祀」里有全部参数（含「开屏动画」一节）
+  * 设置界面左下角出现 Q 版吉祥物
   * 刷新页面或重开 DSH 时会先播开屏短片；不想要就关「启用开屏动画」
 
 
 七、常见问题
 ------------
-1) 界面没变化
+1) 界面没有变化
    - 检查 bundles 里是否加了 "dsh-theme-su"
    - 检查 pnpm install 是否成功、node_modules\dsh-theme-su 是否存在
-   - 确认是改的「正在使用」的那个 profile
+   - 确认改的是「正在使用」的那个 profile
+   - 插件在启动时加载，改完必须完全退出 DSH 再打开
 
-2) 启动黑屏 / 报插件加载失败
-   - 多半是 package.json 存成了 ANSI 或 JSON 语法错了（多/少逗号）
-   - 把 package.json 改成合法的 JSON 再重启
+2) 启动报插件加载失败
+   - 多半是 package.json 的 JSON 语法有误（多/少逗号）或存成了 ANSI
+   - 改成合法的 UTF-8 JSON 后重启
 
 3) 想换回默认外观
    - 设置 → 内置插件 → 祀 → 关闭「启用主题」
-   - 或把 bundles / dependencies 里的 "dsh-theme-su" 删掉，重跑 pnpm install
+   - 或删掉 bundles / dependencies 里的 "dsh-theme-su"，重跑 pnpm install
 
 4) 想彻底删除
-   - 删掉 profile 的 node_modules\dsh-theme-su 软链、package.json 里的两处条目
-   - 以及 %USERPROFILE%\.dsh\dsh-theme-su\ （保存的配置）
+   - 删掉 profile 的 node_modules\dsh-theme-su 软链，以及 package.json 里的两处条目
+   - 再删掉 %USERPROFILE%\.dsh\dsh-theme-su\ （保存的主题与开屏设置）
 
 
 版本与来源
 ----------
   * 仓库：https://github.com/MikamiLing/dsh-theme-su
-  * 版本：v0.0.2（主题 + 可换媒体开屏动画）
-  * 许可证：插件代码 MIT；assets\ 里的图片版权归原画作者，见 LICENSE；
-    开屏实现来自 dsh-splash-animation；内置短片 assets\splash-default.mp4
-    为用户提供的 1.mp4，版权与再分发范围自行确认。见 THIRD_PARTY_NOTICES.md
+  * 版本：v0.1.1
+  * 许可证：插件代码 MIT；assets\ 内的立绘素材版权归原画作者，见 LICENSE；
+    开屏动画移植自 dsh-splash-animation（MIT）；内置短片 assets\splash-default.mp4
+    的版权与再分发范围请自行确认。详见 THIRD_PARTY_NOTICES.md。

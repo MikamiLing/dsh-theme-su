@@ -28,9 +28,20 @@ const PACKAGE_DIR = resolve(fileURLToPath(new URL('./', import.meta.url)))
 /** 自带开场视频；用户没有填路径时播放它。 */
 export const BUNDLED_SPLASH = join(PACKAGE_DIR, 'assets', 'splash-default.mp4')
 
-/** 开屏动画的两个专用路由（配置读写复用主题的 /dsh-theme-su/config）。 */
+/**
+ * 自带开场视频的首帧海报。
+ *
+ * 它和 `BUNDLED_SPLASH` 是**一对**：开屏播放前先显示这张图，视频解出第一帧
+ * 再淡出，所以启动时不会看到黑屏。换视频时应同时换掉海报（配置里的
+ * `splashPosterSrc`），否则宁可退回纯色也不要贴一张不属于这段视频的图。
+ */
+export const BUNDLED_SPLASH_POSTER = join(PACKAGE_DIR, 'assets', 'splash-poster.jpg')
+
+/** 开屏动画的专用路由（配置读写复用主题的 /dsh-theme-su/config）。 */
 export const SPLASH_MEDIA_ROUTE = '/dsh-theme-su/splash/asset'
 export const SPLASH_PICK_ROUTE = '/dsh-theme-su/splash/pick'
+/** 用户自选首帧海报（只走配置，不在设置面板里暴露）。 */
+export const SPLASH_POSTER_ROUTE = '/dsh-theme-su/splash/poster'
 
 /**
  * 支持的媒体格式：扩展名（无点、小写）→ MIME。
@@ -116,6 +127,33 @@ export function resolveSplashMedia(src, dshHome) {
 }
 
 /**
+ * 解析首帧海报。
+ *
+ * 规则刻意做成「成对」的：
+ *  - 填了 `splashPosterSrc` 就用它（必须是图片）；
+ *  - 没填且正在播自带视频时，用自带海报；
+ *  - 换了自定义视频却没配海报 → 返回 undefined，客户端退回纯色遮罩。
+ *    这一条是有意的：贴一张不属于这段视频的首帧，比黑一下更糟。
+ * @param settings - 规范化后的配置。
+ * @param media - {@link resolveSplashMedia} 的结果。
+ * @param dshHome - DSH home 绝对路径。
+ * @returns `{ source, name, path?, mime? }` 或 undefined。
+ */
+export function resolveSplashPoster(settings, media, dshHome) {
+  const custom = String(settings.splashPosterSrc ?? '').trim()
+  if (custom !== '') {
+    const resolved = resolveMedia(custom, dshHome)
+    if (resolved.configured !== true || resolved.problem !== undefined) return undefined
+    if (resolved.kind !== 'image') return undefined
+    return { source: 'chosen', name: resolved.name, path: resolved.path, mime: resolved.mime }
+  }
+  if (media.source === 'bundled' && existsSync(BUNDLED_SPLASH_POSTER)) {
+    return { source: 'bundled', name: 'splash-poster.jpg' }
+  }
+  return undefined
+}
+
+/**
  * 描述一个具体文件，或说明为什么不能播。
  * @param src - 配置里的路径。
  * @param dshHome - DSH home 绝对路径。
@@ -178,18 +216,26 @@ function mediaPayload(media) {
  * 配置接口里开屏动画那一块。
  * @param settings - 规范化后的完整配置。
  * @param dshHome - DSH home 绝对路径。
- * @returns 播放状态、媒体描述与设置页要显示的路径。
+ * @param bundledPosterUrl - 自带海报的 URL；调用方提供，避免这里知道主题的资源路由。
+ * @returns 播放状态、媒体描述、首帧海报与设置页要显示的路径。
  */
-export function splashWire(settings, dshHome) {
+export function splashWire(settings, dshHome, bundledPosterUrl) {
   const media = resolveSplashMedia(settings.splashSrc, dshHome)
   const playable = media.configured === true && media.problem === undefined
+  const poster = resolveSplashPoster(settings, media, dshHome)
   return {
     engaged: settings.splashEnabled === true && playable,
     media: mediaPayload(media),
+    // 首帧海报：自带的一对给资源路由，自选的给专用路由；没有就是 null，
+    // 客户端据此决定是显示海报还是退回纯色遮罩。
+    poster: poster === undefined ? null : {
+      url: poster.source === 'bundled' ? (bundledPosterUrl ?? null) : SPLASH_POSTER_ROUTE,
+      source: poster.source,
+      name: poster.name,
+    },
     problem: media.problem ?? null,
     source: media.source ?? null,
-    // 设置页里显示实际在用的路径：没填时显示自带视频的绝对路径，避免输入框
-    // 空着、下面却说「正在使用内置视频」。
+    // 设置页里显示实际在用的路径：没填时显示自带视频的绝对路径。
     effectiveSrc: media.configured === true
       ? (media.source === 'bundled' ? BUNDLED_SPLASH : String(settings.splashSrc ?? '').trim())
       : '',
