@@ -1,6 +1,6 @@
 # 祀 · dsh-theme-su
 
-给 DeepSeek Harness 的水墨主题：整页一张长卷，侧栏压一层宣纸，角色从侧栏底部站起来。
+DeepSeek Harness 的祀主题
 
 纸色是象牙白，墨色是新墨，强调色是青玉。纸色、立绘、圆角、毛玻璃等观感都能在设置里调，改完即时预览。
 
@@ -10,14 +10,14 @@
 
 ![祀 · 设置界面](docs/04-settings.png)
 
-## 它带来什么
+## 效果
 
 - **整页长卷**：一张水墨长卷铺满窗口，上面覆一层可调的纸色，文字始终清楚。
-- **宣纸侧栏**：半透明的侧栏，可选毛玻璃；底部站着角色立绘。
+- **宣纸侧栏**：半透明的侧栏，可选毛玻璃；底部角色立绘。
 - **立绘轮换**：四张同尺度的半身像，切换对话时换一张，也可以固定其中一张或隐藏。
 - **三套纸墨**：青玉、新墨、苔痕，深浅两套画布同步变化。
-- **设置页**：实时预览所有主题参数，左下角还有一只 Q 版吉祥物。
-- **开屏动画**：打开或刷新页面时先播一段短片，首帧海报过渡，播完淡出。
+- **设置页**：实时预览所有主题参数，左下角还有一只 Q 版祀。
+- **开屏动画**：打开或刷新页面时先播动画，播完淡出。
 - **随时可关**：关掉「启用主题」，界面与没装插件时完全一致。
 
 ## 安装
@@ -104,6 +104,6 @@ dsh plugin --profile <profile> add github:MikamiLing/dsh-theme-su
 
 ## 致谢与许可
 
-- 开屏动画移植自 [dsh-splash-animation](https://github.com/KDDKBD/DeepSeek-splash-animation)（MIT），详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+- 开屏动画实现逻辑参照 [dsh-splash-animation](https://github.com/KDDKBD/DeepSeek-splash-animation)（MIT），详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 - 设计语言参考了社区里的「特蕾西娅」主题。
 - 插件代码以 MIT 发布；`assets/` 内的立绘素材版权归原画作者，仅供个人学习交流，禁止商用，侵权请联系删除。
